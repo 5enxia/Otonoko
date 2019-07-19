@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.27703.2000
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PQ_GRAPH", "PQ_GRAPH.vcxproj", "{7133D938-D466-4974-AE32-B0A3C70922AC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7133D938-D466-4974-AE32-B0A3C70922AC}.Debug|Win32.ActiveCfg = Debug|Win32
+		{7133D938-D466-4974-AE32-B0A3C70922AC}.Debug|Win32.Build.0 = Debug|Win32
+		{7133D938-D466-4974-AE32-B0A3C70922AC}.Release|Win32.ActiveCfg = Release|Win32
+		{7133D938-D466-4974-AE32-B0A3C70922AC}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A9CC8760-08A7-41CD-9426-ECEC6A4EB5FC}
+	EndGlobalSection
+EndGlobal
