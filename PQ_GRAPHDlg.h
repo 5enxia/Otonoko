@@ -1,29 +1,28 @@
-// PQ_GRAPHDlg.h : ヘッダー ファイル
-//
+// PQ_GRAPHDlg.h 
 
 #pragma once
 #include "afxwin.h"
 
 
-// CPQ_GRAPHDlg ダイアログ
+// CPQ_GRAPHDlg Dialog 
 class CPQ_GRAPHDlg : public CDialog
 {
-// コンストラクション
+// Contruction
 public:
-	CPQ_GRAPHDlg(CWnd* pParent = NULL);	// 標準コンストラクタ
+	CPQ_GRAPHDlg(CWnd* pParent = NULL);	// Standard Constructor 
 
-// ダイアログ データ
+// Dialog data
 	enum { IDD = IDD_PQ_GRAPH_DIALOG };
 
 	protected:
-	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV サポート
+	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV support
 
 
-// 実装
+// Implementation
 protected:
 	HICON m_hIcon;
 
-	// 生成された、メッセージ割り当て関数
+	// Automaitcally Generated Message Functions
 	virtual BOOL OnInitDialog();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnPaint();
@@ -34,35 +33,35 @@ public:
 	afx_msg void OnBnClickedButton1();
 	afx_msg void OnBnClickedButton2();
 	afx_msg void OnBnClickedButton3();
-	LRESULT CPQ_GRAPHDlg::OnMessageRCV( WPARAM wParam, LPARAM lParam);	// この行は手入力する必要がある
+	LRESULT CPQ_GRAPHDlg::OnMessageRCV( WPARAM wParam, LPARAM lParam);	// CallBack Function in DataReciver
 
 private:
 	// ------------------------------Font------------------------------
 	CFont *m_newFont;
-	bool fontFlag;
-	int fontTime;
+	bool fontFlag;										// Font Thread Flag
+	int fontTime;										// Time Counter
 
 	// ------------------------------OpneGL------------------------------
-	CStatic m_glView;
-	bool glFlag;
-	CDC *m_pDC; // Picture Controlのデバイスコンテキストを保存する変数
-	HGLRC m_GLRC; // OpenGLのレンダリングコンテキストの変数
-	BOOL SetUpPixelFormat(HDC hdc);
+	CStatic m_glView; 
+	bool glFlag;										// OpenGL Thread Flag
+	CDC *m_pDC;									// Picture Control's Device Context
+	HGLRC m_GLRC;								// OpenGL's Device Context
+	BOOL SetUpPixelFormat(HDC hdc);		// Setup Pixel Format in Picture Control
 
 public:
 	// ------------------------------Font------------------------------
-	void fontCallback(CString soundInfo); // Fontスレッド用のコールバック関数
-	void setFontStyle();
-	CEdit msgED1; 
+	void fontCallback(CString soundInfo);	// Font Callback Function
+	void setFontStyle();							// Set Font-style
+	CEdit msgED1;									// Edit Control 1
 
 	// ------------------------------OpneGL------------------------------
-	void glCallback(); // OpenGLスレッド用のコールバック関数
-	void glSetup(); 	// OpenGlのコンテキストの準備とOpenGLの初期化を行う関数
+	void glCallback();								// OpenGL Callback Function
+	void glSetup(); 									// Setup OpenGL & OpenGL Context
 
 	// ------------------------------MIDI------------------------------
-	void midiCallback(const double gx, const double gy, const double ey);
+	void midiCallback(const double gx, const double gy, const double ey);	// Sound Callback Function
 
 	// ------------------------------DataReciever------------------------------
-	CEdit msgED3;
-	afx_msg void OnDestroy();
+	CEdit msgED3;									// Edit Control 3
+	afx_msg void OnDestroy();					// Run when Window is Destroied
 };

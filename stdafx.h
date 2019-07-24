@@ -37,30 +37,20 @@
 
 
 
-// 以下、手動にて追加
 // ------------------------------DataReciver------------------------------
-#include <process.h> // process.hはマルチスレッドＡＰＩを使用するために必要
+#include <process.h> // Multi thread API
 
 // ------------------------------Midi------------------------------
-#pragma comment( lib, "winmm.lib")
-#include <mmsystem.h>
+#pragma comment( lib, "winmm.lib")  // Windows-Multimedia-API
+#include <mmsystem.h> // Windows-Multimedia-API
 
 // ------------------------------OpneGL------------------------------
-#pragma comment(lib,"opengl32.lib")
-#pragma comment(lib,"glu32.lib")
-#include <GL/GL.h>
-#include <GL/GLU.h>
-#include <GL/glut.h>
+#pragma comment(lib,"opengl32.lib")	// OpenGL
+#pragma comment(lib,"glu32.lib")	// GLU
+#include <GL/glut.h>	// GLUT
 
 // ------------------------------General------------------------------
-#include <thread>
-#include <chrono>
-#include <cmath>
+#include <thread>	 // C++ std Multithread lib
+#include <chrono>	// C++ std Time lib
+#include <cmath>	// C++ std Math lib
 const double PI = 3.141592653589793;
-
-
-
-
-
-
-

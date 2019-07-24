@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ で生成されたインクルード ファイル。
-// PQ_GRAPH.rc で使用
+// include files : Genrated by Microsoft Visual C++
+// use in PQ_GRAPH.rc
 //
 #define IDM_ABOUTBOX                    0x0010
 #define IDD_ABOUTBOX                    100

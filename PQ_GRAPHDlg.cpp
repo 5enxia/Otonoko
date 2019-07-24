@@ -1,5 +1,4 @@
-// PQ_GRAPHDlg.cpp : 実装ファイル
-//
+// PQ_GRAPHDlg.cpp
 
 #include "stdafx.h"
 #include "PQ_GRAPH.h"
@@ -9,99 +8,96 @@
 #include "Viewer.h"
 // ------------------------------MIDI------------------------------
 #include "Sound.h"
-static HMIDIOUT hMIDI;
+static HMIDIOUT hMIDI;											// MIDI Handler
+
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
 
-#include <process.h>
-// process.hはマルチスレッドＡＰＩを使用するために必要
-
 #define WM_RCV (WM_USER+1)
 
-#define MaxComPort	99							// 識別できるシリアルポート番号の限界
+#define MaxComPort	99											// Upper limit No. that recognizable com port
 #define DefaultPort 4
 
-int RScomport = DefaultPort;					// default COM port #4
-CString ParamFileName = _T("PQ_GRAPH.txt");		// テキストファイルにて下記の情報を入れておく
-												// シリアル通信ポートの番号
-												// データファイル書き出し先のディレクトリ名
-												// ※テキストエディタにて内容を変更できる
+int RScomport = DefaultPort;									// default COM port #4
 
-CString DefaultDir = _T("D:\\");				// データファイルを書き出す際のデフォルトディレクトリ
-CString CurrentDir = _T("D:\\");				// Parameter Fileの内容で上書きされる
+																			// Contain below Infomation in text file(PQ_GRAPH.txt) before run
+																			// Serial Communication Port No.
+																			// Destination directory name to write data
+CString ParamFileName = _T("PQ_GRAPH.txt");		
 
-HANDLE	hCOMnd = INVALID_HANDLE_VALUE;			// 非同期シリアル通信用ファイルハンドル
-OVERLAPPED rovl, wovl;							// 非同期シリアル通信用オーバーラップド構造体
 
-HWND hDlg;										// ダイアログ自体のウィンドウハンドルを格納する変数
-HANDLE serialh;									// 通信用スレッドのハンドル
 
-int rf;											// 通信用スレッドの走行状態制御用変数
-int datasize;									// 正しく受信したデータのサンプル数
+CString DefaultDir = _T("D:\\");								// Default Directory when wittring data
+CString CurrentDir = _T("D:\\");							// Rewrite Directory in Parameter File 
+HANDLE	hCOMnd = INVALID_HANDLE_VALUE;		// File Handle for Async Serial Communication
+OVERLAPPED rovl, wovl;											// Overlaped Struct for Async Serial Communication
 
-#define DATASORT 11								// データの種類は11種類
-												// 16-b int Ax, Ay, Az, Gx, Gy, Gz, Temperature,
-												// float e4x, e4y, e4z
-												// float alpha
+HWND hDlg;															// Variable that contain Window Handle, Dialog itself 
+HANDLE serialh;														// Thread Handle for Communication
 
-												// databuf[SORT][i];
-												// 1,2,3 -> ax, ay, az
-												// 4,5,6 -> gx, gy, gz
-												// 7 -> temperature
-												// 8, 9, 10 -> e4x, e4y, e4z
-												// 11 -> alpha
+int rf;																	// Running State Controler of Communication Thread
+int datasize;															// Size of Sample data corectly Recieved
 
-#define PACKETSIZE 33							// ワイヤレス通信における１パケットあたりのデータバイト数
-												// PREAMBLE 1
-												// SEQ 1
-												// Ax, Ay, Az, Gx, Gy, Gz, Temp	 2 bytes each (14)
-												// e4x, e4y, e4z 4bytes each (12)
-												// alpha 4bytes (4)
-												// checksum 1
-												// Total 33
+#define DATASORT 11											// Data types
+// 16-b int Ax, Ay, Az, Gx, Gy, Gz, Temperature,
+// float e4x, e4y, e4z
+// float alpha
 
-#define PREAMBLE 0x65							// パケットの先頭を示すデータ（プリアンブル）
+// databuf[SORT][i];
+// 1,2,3		-> ax, ay, az 
+// 4,5,6		-> gx, gy, gz 
+// 7			-> temperature 
+// 8,9,10	-> e4x, e4y, e4z
+// 11			-> alpha
 
-#define SAMPLING 100							// サンプリング周波数 [Hz]
-#define MAXDURATION 3600						// データの記録は１時間（３６００秒）までとする
+
+#define PACKETSIZE 33	// Byte size per packet
+// PREAMBLE																1
+// SEQ																		1
+// Ax, Ay, Az, Gx, Gy, Gz, Temperature (2bytes each)	14
+// e4x, e4y, e4z (4bytes each)										12
+// alpha (4bytes)														4
+// checksum																1
+// Total																		33
+
+
+#define PREAMBLE 0x65																// Indicate Head of Packet Data（PREAMBLE）
+
+#define SAMPLING 100																// Samping frequency [Hz]
+#define MAXDURATION 3600														// Recoding Time Limit: 1hour
 #define MAXDATASIZE (SAMPLING*DATASORT*MAXDURATION)
 
-float databuf[DATASORT+1][MAXDATASIZE];			// グローバル変数配列にセンサデータを格納する
-int errcnt;										// 通信エラーの回数を数える変数
+float databuf[DATASORT+1][MAXDATASIZE];								// Store Sensor Data to Array Type Variable(Global, databuf)
+int errcnt;																					// Error Counter
 
-int xaxis;										// グラフ描画時の時間幅　（単位：秒）
-int yaxis;										// グラブ描画を行う軸の番号（1～DATASORT）
-int gain;										// グラフの縦軸の拡大倍率
-
+/*
+* Close Opened Serial Port
+*/
 static void CloseComPort(void)
-// オープンしているシリアルポートをクローズする
 {
-	if( hCOMnd == INVALID_HANDLE_VALUE)
-		return;
+	if( hCOMnd == INVALID_HANDLE_VALUE) return;
 	CloseHandle( hCOMnd);
 	hCOMnd = INVALID_HANDLE_VALUE;
 }
 
+/*
+*  Open Serial Port that Selected in port (Async Mode)
+*/
 static DWORD OpenComPort(int port)
-// portにて指定した番号のシリアルポートをオープンする（非同期モード）
 {
 	CString ComPortNum;
 	COMMPROP	myComProp;
 	DCB	myDCB;
 	COMSTAT	myComStat;
 
-	// 非同期ＩＯモードなのでタイムアウトは無効
+// Async I/O Mode, so TimeOut is N/A
 //	_COMMTIMEOUTS myTimeOut;
 
-	if( (port < 0) || (port > MaxComPort))
-		return -1;
-	if( port < 10){
-		ComPortNum.Format(_T("COM%d"), port);
-	}else{
-		ComPortNum.Format(_T("\\\\.\\COM%d"), port);	// Bill Gates' Magic ...
-	}
+	if( (port < 0) || (port > MaxComPort)) return -1;
+	if( port < 10)	ComPortNum.Format(_T("COM%d"), port);
+	else ComPortNum.Format(_T("\\\\.\\COM%d"), port);	// Bill Gates' Magic ...
 
 	ZeroMemory( &rovl, sizeof(rovl));
 	ZeroMemory( &wovl, sizeof(wovl));
@@ -114,18 +110,16 @@ static DWORD OpenComPort(int port)
 
 	hCOMnd = CreateFile( (LPCTSTR)ComPortNum, GENERIC_READ | GENERIC_WRITE, 0, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
-	// COMポートをオーバラップドモード（非同期通信モード）にてオープンしている
+	// Open COM Port with Overlaped Mode(Async Communication Mode)
 
-	if( hCOMnd == INVALID_HANDLE_VALUE){
-		return -1;
-	}
+	if( hCOMnd == INVALID_HANDLE_VALUE) return -1;
 
 	GetCommProperties( hCOMnd, &myComProp);
 	GetCommState(hCOMnd, &myDCB);
 //	if( myComProp.dwSettableBaud & BAUD_128000)
 //		myDCB.BaudRate = CBR_128000;
 //	else
-	myDCB.BaudRate = CBR_115200;		// 115.2KbpsモードをWindowsAPIは正しく認識しない
+	myDCB.BaudRate = CBR_115200;	// Windows API disable to recognize 115.3Kbps Mode Correctly
 //	myDCB.BaudRate = CBR_9600;
 	myDCB.fDtrControl = DTR_CONTROL_DISABLE;
 	myDCB.Parity = NOPARITY;
@@ -141,7 +135,7 @@ static DWORD OpenComPort(int port)
 	char	rbuf[32];
 	DWORD	length;
 
-// オーバーラップドモードでは、タイムアウト値は意味をなさない
+// TimeOut Value is N/A when Overlaped Mode
 
 //	GetCommTimeouts( hCOMnd, &myTimeOut);
 //	myTimeOut.ReadTotalTimeoutConstant = 10;	// 10 msec
@@ -160,7 +154,7 @@ static DWORD OpenComPort(int port)
 //			ReadFile( hCOMnd, rbuf, 1, &length, NULL);		
 //
 
-// オーバーラップドモードで、同期通信的なことを行うためのパッチコード
+// Patch Code that to do Sync Communication like in Overlaped Mode
 			ReadFile( hCOMnd, rbuf, 1, &length, &rovl);
 			while(1){
 				if( HasOverlappedIoCompleted(&rovl)) break;
@@ -172,87 +166,85 @@ static DWORD OpenComPort(int port)
 }
 
 
-// コールバック関数によるシリアル通信状況の通知処理
+/*
+* Notify Serial Communication State by Callback Function
+*/
 
 int rcomp;
 
 VOID CALLBACK FileIOCompletionRoutine( DWORD err, DWORD n, LPOVERLAPPED ovl)
 {
-	rcomp = n;			// 読み込んだバイト数をそのままグローバル変数に返す
+	rcomp = n;																			// Return read Byte Size as it is to Global
 }
 
-// 無線パケットを受信するためのスレッド
+																								// Thread that to recieve Wireless Communication Packet
 
-#define RINGBUFSIZE 1024		// 受信用リングバッファのサイズ（バイト数）
+#define RINGBUFSIZE 1024														// Ring Buffer Size (for Recieving) (byte)
 
 unsigned __stdcall serialchk( VOID * dummy)
 {
-	DWORD myErrorMask;						// ClearCommError を使用するための変数
-	COMSTAT	 myComStat;						// 受信バッファのデータバイト数を取得するために使用する
-	unsigned char buf[RINGBUFSIZE];			// 無線パケットを受信するための一時バッファ
+	DWORD myErrorMask;															// Variable for ClearCommError 
+	COMSTAT	 myComStat;															// Use for Getting Recieved Buffer Data Byte Size
+	unsigned char buf[RINGBUFSIZE];											// temporal buffer for Recieving Wireless Packet
 
-	unsigned char ringbuffer[RINGBUFSIZE];	// パケット解析用リングバッファ
-	int rpos, wpos, rlen;					// リングバッファ用ポインタ（read, write)、データバイト数
-	int rpos_tmp;							// データ解析用read位置ポインタ
-	int rest;								// ClearCommErrorにて得られるデータバイト数を記録する
+	unsigned char ringbuffer[RINGBUFSIZE];									// Ring Buffer for Analising Packet
+	int rpos, wpos, rlen;																// Pointer for Ring buffer (read, write), Data Byte size
+	int rpos_tmp;																			// Read Position Pointer for Data Analising
+	int rest;																					// Record data byte size that can get in ClearCommError
 
-	int seq, expected_seq;					// モーションセンサから受信するシーケンス番号（８ビット）
-											// と、その期待値（エラーがなければ受信する値）
+	int seq, expected_seq;															// Seaquence No. that Received from Motion Sensor (8 bit)
+																								// And the expectational value (Recieved Value when No error）
 
-	unsigned char packet[PACKETSIZE];		// パケット解析用バッファ （１パケット分）
+	unsigned char packet[PACKETSIZE];										// Buffer for Packet Analising (Equivalent to 1 packet)
 	int i, chksum, tmp;
 	float *ftmp;
 
-	expected_seq = 0;						// 最初に受信されるべきSEQの値はゼロ
-	rpos = wpos = 0;						// リングバッファの読み出し及び書き込みポインタを初期化
-	rlen = 0;								// リングバッファに残っている有効なデータ数（バイト）
+	expected_seq = 0;																	// Shoud be recieved SEQ value = 0
+	rpos = wpos = 0;																	// Initialize Read and Write Pointer of Ring Buffer
+	rlen = 0;																				// Rest of Ring Buffer Data(byte)
 
 	while(rf){
-		rcomp = 0;					// FileIOCompletionRoutineが返す受信バイト数をクリアしておく
-		// まずは無線パケットの先頭の１バイトを読み出しに行く
+		rcomp = 0;																		// Clear Recived Data Byte Size (File I/O CompletionRoutin return)
+																								// First, Read head of Wireless Communication Packet.
 		ReadFileEx( hCOMnd, buf, 1, &rovl, FileIOCompletionRoutine);
 
 		while(1){
-			SleepEx( 100, TRUE);	// 最大で100ミリ秒 = 0.1秒の間スリープするが、その間に
-			if(rcomp == 1) break;	// I/O完了コールバック関数が実行されるとスリープを解除する
+			SleepEx( 100, TRUE);														// Sleep(Max 100ms)
+			if(rcomp == 1) break;													// Unsleep when run I/O Complete Callback Function while Sleep
 
-			if(!rf){				// 外部プログラムからスレッドの停止を指示された時の処理
-				CancelIo(hCOMnd);	// 発行済みのReadFileEx操作を取り消しておく
+			if(!rf){																			// Processing when Out ot this programe command to stop thread
+				CancelIo(hCOMnd);													// Cancel pulished ReadFileEx Operation
 				break;
 			}
-									// データが送られてこない時間帯では、受信スレッド内のこの部分
-									// が延々と処理されているが、大半がSleepExの実行に費やされる
-									// ことで、システムに与える負荷を軽減している。
+																								// When don't Recive data, this part run endlessly. 
+																								//But most part of process use to run SleepEx, reduce system load.
 		}
 
-		if(!rf) break;				// 外部プログラムからスレッドの停止を指示された
+		if(!rf) break;																		// Out ot this programe command to stop thread
 
-		ringbuffer[wpos] = buf[0];	// 最初の１バイトが受信された
-		wpos++;						// リングバッファの書き込み位置ポインタを更新
-		wpos = (wpos >= RINGBUFSIZE)?0:wpos;	// １周していたらポインタをゼロに戻す（なのでRING）
-		rlen++;						// リングバッファ内の有効なデータ数を＋１する
+		ringbuffer[wpos] = buf[0];													// Firt byte Recived
+		wpos++;																			// Update write position pointer of ring buffer 
+		wpos = (wpos >= RINGBUFSIZE)?0:wpos;							// Set pointer 0 when 1 laped（Because of ring buffer)
+		rlen++;																				// increase(+1) valid data size in ring buffer
+		ClearCommError( hCOMnd, &myErrorMask, &myComStat);	// API that check state of Recieve buffer
 
-		ClearCommError( hCOMnd, &myErrorMask, &myComStat);	// 受信バッファの状況を調べるＡＰＩ
+		rest = myComStat.cbInQue;												// Get data byte size in Recieved buffer
 
-		rest = myComStat.cbInQue;	// 受信バッファに入っているデータバイト数が得られる
-
-		if(rest == 0) continue;		// 何も入っていなかったので次の１バイトを待ちにいく
+		if(rest == 0) continue;														// Recieved buffer was empty, so wait next byte.
 
 		rcomp = 0;
 		ReadFileEx( hCOMnd, buf, rest, &rovl, FileIOCompletionRoutine);
-									// 受信バッファに入っているデータを読み出す
-									// 原理的にはrestで示される数のデータを受信することができるが、
-									// 万一に備えてデータが不足してしまった時の処理を考える。
+																								// Read Data in Recived buffer
+																								// able to recieve num of data that rest indicates in principle.
+																								// But ready in case shortage data, we prepare other process.
 
-		SleepEx(16, TRUE);			// Windowsにおけるシリアルポートの標準レイテンシ（16msec）だけ待つ
-		if( rcomp != rest){
-			CancelIo(hCOMnd);		// ClearCommErrorで取得したデータバイト数に満たない
-		}							// データしか受信されなかったので、先に発行したReadFileEx
-									// をキャンセルしている
-
+		SleepEx(16, TRUE);															// Wait Staradard latency (16ms) on Windows Serial Port
+		if (rcomp != rest) {
+			CancelIo(hCOMnd);														// Because don't reach data byte size on ClearCommError, Cancel ReadFileEx
+		}
 		i = 0;
-		while(rcomp > 0){			// rcompには読み出すことのできたデータのバイト数が入っている
-			ringbuffer[wpos] = buf[i];	// リングバッファに受信データを転送する
+		while(rcomp > 0){																// rcomp has num of data bytes that able to read
+			ringbuffer[wpos] = buf[i];												// tranfer Recieved data to ring buffer
 			wpos++;
 			wpos = (wpos >= RINGBUFSIZE)?0:wpos;
 			rlen++;
@@ -260,45 +252,46 @@ unsigned __stdcall serialchk( VOID * dummy)
 			rcomp--;
 		}
 
-		// ここからパケット解析に入る
-
-		while(1){					// 有効なパケットである限り解析を継続する
+		// Begin Packet Analysing
+		while(1){																			// Cotinue Analysing while available packet 
 			while( rlen > 0){
 				if( ringbuffer[rpos] == PREAMBLE) break;
-				rpos++;								// 先頭がPREAMBLEではなかった
+				rpos++;																	// Head is not PREAMBLE
 				rpos = (rpos >= RINGBUFSIZE)?0:rpos;
-				rlen--;								// 有効なデータ数を１つ減らして再度先頭を調べる
+				rlen--;																		// increase Available data size and check head again
 			}
 
-			if(rlen < PACKETSIZE) break;	// 解析に必要なデータバイト数に達していなかったので
-											// 最初の１バイトを待つ処理に戻る
+			if(rlen < PACKETSIZE) break;											// Becase din't reach needed num of data bytes for analysing,
+																								// go back to Process that wait fisrt 1 byte 
 
-			rpos_tmp = rpos;	// リングバッファを検証するための仮ポインタ
-								// まだリングバッファ上にあるデータが有効であると分かったわけではない
+			rpos_tmp = rpos;	
+																								// tmp Pointer for checking ring buffer
+																								// Don't  find data on ring buffer are valid yet
 
 			for( i = 0, chksum = 0; i < (PACKETSIZE-1); i++){
-				packet[i] = ringbuffer[rpos_tmp];	// とりあえず解析用バッファにデータを整列させる
+				packet[i] = ringbuffer[rpos_tmp];								// For now, align data on buffer
 				chksum += packet[i];
 				rpos_tmp++;
 				rpos_tmp = (rpos_tmp >= RINGBUFSIZE)?0:rpos_tmp;
 			}
 
-			if( (chksum & 0xff) != ringbuffer[rpos_tmp]){	// チェックサムエラーなのでパケットは無効
-				rpos++;										// 先頭の１バイトを放棄する
+			if( (chksum & 0xff) != ringbuffer[rpos_tmp]){					// Because Check-sum-Error, Packet is Invalid
+				rpos++;																	// release head(1byte) 
 				rpos = (rpos >= RINGBUFSIZE)?0:rpos;
 				rlen--;
-				continue;	// 次のPREAMBLEを探しにいく
+				continue;																	// Search next PREAMBLE
 			}
 
-			// PREAMBLE、チェックサムの値が正しいPACKETSIZ長のデータがpacket[]に入っている
+																								// packet[] has data that length of data is PACKETSIZE
+																								// And it hascorrectlry PREAMBLE and Check-sum
 
 			seq = packet[1];
-			databuf[0][datasize] = (float)seq;		// seq は８ビットにて0～255の間を1ずつカウントアップしていく数値
+			databuf[0][datasize] = (float)seq;									// seq is variable of countup(+1) between 0-255 (8bit)
 
-			if(seq != expected_seq){		// 受信されたseqが、１つ前のseqに+1したものであることをチェックする
-				errcnt += (seq + 256 - expected_seq)%256;	// パケットエラー数を更新する
+			if(seq != expected_seq){												// Check recieved seq == previous seq +1 ?
+				errcnt += (seq + 256 - expected_seq)%256;				// Update Packet Error counter
 			}
-			expected_seq = (seq + 1)%256;					// 次のseqの期待値をexpected_seqに入れる
+			expected_seq = (seq + 1)%256;										// Put next expected seq in expected_seq
 
 			for (i = 0; i < 7; i++) {
 				// acc x 3, gyro x 3, temperature x 1
@@ -312,34 +305,36 @@ unsigned __stdcall serialchk( VOID * dummy)
 			}
 			
 			datasize++;
-			datasize = (datasize >= MAXDATASIZE)?(MAXDATASIZE-1):datasize;	// データ数が限界に到達した際の処理
+			datasize = (datasize >= MAXDATASIZE)?(MAXDATASIZE-1):datasize;		// Process when Data size reach LIMIT
 
-			if( datasize%1 == 0){								// 10サンプルに1回の割合でメッセージを発生させる
-				PostMessage( hDlg, WM_RCV, (WPARAM)1, NULL);	// 100Hzサンプリングであれば0.1秒に1回画面が更新される
-			}													// PostMessage()自体では処理時間は極めて短い
+			// Post Message(100mesage/sec)
+			// PostMessage itself, Processing time is very short
+			if( datasize%1 == 0) PostMessage( hDlg, WM_RCV, (WPARAM)1, NULL);	
 
-			rpos = (rpos + PACKETSIZE)%RINGBUFSIZE;			// 正しく読み出せたデータをリングバッファから除去する
-			rlen -= PACKETSIZE;								// バッファの残り容量を更新する
+			rpos = (rpos + PACKETSIZE)%RINGBUFSIZE;											// leave correclty read data from ring buffer
+			rlen -= PACKETSIZE;																				// Upadate rest of buffer volume
 		}
 	}
-	_endthreadex(0);	// スレッドを消滅させる
+	_endthreadex(0);																							// Destroy Thread 
 	return 0;
 }
 
-// アプリケーションのバージョン情報に使われる CAboutDlg ダイアログ
 
+/*
+* CAboutDlg Dialog : Use for Application Version Information
+*/
 class CAboutDlg : public CDialog
 {
 public:
 	CAboutDlg();
 
-// ダイアログ データ
+// Dialog Data
 	enum { IDD = IDD_ABOUTBOX };
 
 	protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV Support 
 
-// 実装
+// Implemntation
 protected:
 	DECLARE_MESSAGE_MAP()
 };
@@ -357,7 +352,7 @@ BEGIN_MESSAGE_MAP(CAboutDlg, CDialog)
 END_MESSAGE_MAP()
 
 
-// CPQ_GRAPHDlg ダイアログ
+// CPQ_GRAPHDlg Dialog 
 
 
 CPQ_GRAPHDlg::CPQ_GRAPHDlg(CWnd* pParent /*=NULL*/)
@@ -369,13 +364,13 @@ CPQ_GRAPHDlg::CPQ_GRAPHDlg(CWnd* pParent /*=NULL*/)
 void CPQ_GRAPHDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialog::DoDataExchange(pDX);
-	// ------------------------------Font------------------------------
+	// ------------------------------Font--------------------------------------
 	DDX_Control(pDX, IDC_EDIT1, msgED1);
-	// ------------------------------General------------------------------
+	// ------------------------------General----------------------------------
 	DDX_Control(pDX, IDC_EDIT2, msgED2);
-	// ------------------------------DataReciver------------------------------
+	// ------------------------------DataReciver-----------------------------
 	DDX_Control(pDX, IDC_EDIT3, msgED3);
-	// ------------------------------OpneGL-----------------------------
+	// ------------------------------OpneGL---------------------------------
 	DDX_Control(pDX, IDC_GRAPH, m_glView);
 }
 
@@ -387,24 +382,22 @@ BEGIN_MESSAGE_MAP(CPQ_GRAPHDlg, CDialog)
 	ON_BN_CLICKED(IDC_BUTTON1, &CPQ_GRAPHDlg::OnBnClickedButton1)
 	ON_BN_CLICKED(IDC_BUTTON2, &CPQ_GRAPHDlg::OnBnClickedButton2)
 	ON_BN_CLICKED(IDC_BUTTON3, &CPQ_GRAPHDlg::OnBnClickedButton3)
-	ON_MESSAGE( WM_RCV, &CPQ_GRAPHDlg::OnMessageRCV)
+	ON_MESSAGE( WM_RCV, &CPQ_GRAPHDlg::OnMessageRCV) // Non Automatically Generation
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
-// メッセージマップの最後のON_MESSAGEの行は手入力している
 
 
-// CPQ_GRAPHDlg メッセージ ハンドラ
+// CPQ_GRAPHDlg Message Handler
 
 BOOL CPQ_GRAPHDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();
 
-	// "バージョン情報..." メニューをシステム メニューに追加します。
+	// Version Information : Add Menu to System Menu
 
-	hDlg = this->m_hWnd;		// このダイアログへのハンドルを取得する
-								// このコードは手入力している
+	hDlg = this->m_hWnd;		// Get this Dialog Handle. This code non Automatically generation
 
-	// IDM_ABOUTBOX は、システム コマンドの範囲内になければなりません。
+	// IDM_ABOUTBOX shoud be in range of system command
 	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
 	ASSERT(IDM_ABOUTBOX < 0xF000);
 
@@ -420,19 +413,17 @@ BOOL CPQ_GRAPHDlg::OnInitDialog()
 		}
 	}
 
-	// このダイアログのアイコンを設定します。アプリケーションのメイン ウィンドウがダイアログでない場合、
-	//  Framework は、この設定を自動的に行います。
-	SetIcon(m_hIcon, TRUE);			// 大きいアイコンの設定
-	SetIcon(m_hIcon, FALSE);		// 小さいアイコンの設定
+	// Set this dialog icon. Case tha Application Main Window is not Dialog. Framework set this setting automatically.
+	SetIcon(m_hIcon, TRUE);			// Setting Large Icon 
+	SetIcon(m_hIcon, FALSE);		// Setting Small Icon 
 
-	// TODO: 初期化をここに追加します。
+	// TODO: Add Initialize Code Below
 
-	// 初期化コードを手入力にて追加している
-	rf = 0;			// 無線パケット受信スレッドは停止
-	datasize = 0;	// モーションデータの数を０に初期化
+	// Add Initialized Code by Manual input
+	rf = 0; // Stop Wireless Packet Reciving Thread
+	datasize = 0;	// Initialize datasize 0
 
-
-	// 設定ファイルを読み込み、シリアル通信用ポート番号とファイル保存先フォルダを設定する
+	// Read Setting File. Set Serial Communication Port No. and Save Directory. 
 	CStdioFile pFile;
 	CString buf;
 	char pbuf[256], dirbuf[_MAX_PATH];
@@ -440,7 +431,7 @@ BOOL CPQ_GRAPHDlg::OnInitDialog()
 	int i, comport, dirlen;
 
 	for( i = 0; i < 256; i++){
-		pbuf[i] = pathname[i] = 0x00;	// 安全のためNULLで埋めておく
+		pbuf[i] = pathname[i] = 0x00;	// Put NULL for safety
 	}
 
 	if(!pFile.Open( ParamFileName, CFile::modeRead)){
@@ -458,10 +449,10 @@ BOOL CPQ_GRAPHDlg::OnInitDialog()
 		CurrentDir.Format(_T("%s\\"), dirbuf);
 		}
 
-		pbuf[1] = pbuf[2];	// Unicodeに対応するためのパッチコード
+		pbuf[1] = pbuf[2];	//Unicode Support Patch Code
 		pbuf[2] = 0x00;
 
-		comport = atoi(pbuf);	// ポート番号をテキストファイルから取得している
+		comport = atoi(pbuf);	 // Get Port No. from Textfile
 
 		CString cpath;
 		pFile.ReadString(cpath);
@@ -482,16 +473,16 @@ BOOL CPQ_GRAPHDlg::OnInitDialog()
 		pFile.Close();
 	}
 
-	// ------------------------------Font------------------------------
+	// ------------------------------Font----------------------------------
 	fontFlag = false;
 	setFontStyle();
 
 	// ------------------------------OpneGL------------------------------
 	glFlag = false;
-	// ------------------------------MIDI------------------------------
-	midiOutOpen(&hMIDI, MIDI_MAPPER, 0, 0, CALLBACK_THREAD); // ここでMIDIデバイスを初期化することで遅延を軽減する
+	// ------------------------------MIDI---------------------------------
+	midiOutOpen(&hMIDI, MIDI_MAPPER, 0, 0, CALLBACK_THREAD); // Open MIDI Device 
 
-	return TRUE;  // フォーカスをコントロールに設定した場合を除き、TRUE を返します。
+	return TRUE;  // Return TRUE, except set Focus Control
 }
 
 void CPQ_GRAPHDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -507,19 +498,20 @@ void CPQ_GRAPHDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	}
 }
 
-// ダイアログに最小化ボタンを追加する場合、アイコンを描画するための
-//  下のコードが必要です。ドキュメント/ビュー モデルを使う MFC アプリケーションの場合、
-//  これは、Framework によって自動的に設定されます。
 
+/*
+* If add minimize button on dialog, need below code for rendering icon.
+* In MFC Application that using Document/View Model case,  Set Automatically by Framework
+*/
 void CPQ_GRAPHDlg::OnPaint()
 {
 	if (IsIconic())
 	{
-		CPaintDC dc(this); // 描画のデバイス コンテキスト
+		CPaintDC dc(this); // Rendering Device Context
 
 		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
 
-		// クライアントの四角形領域内の中央
+		// Center of Client's Rect Area
 		int cxIcon = GetSystemMetrics(SM_CXICON);
 		int cyIcon = GetSystemMetrics(SM_CYICON);
 		CRect rect;
@@ -527,7 +519,7 @@ void CPQ_GRAPHDlg::OnPaint()
 		int x = (rect.Width() - cxIcon + 1) / 2;
 		int y = (rect.Height() - cyIcon + 1) / 2;
 
-		// アイコンの描画
+		// Draw Icon
 		dc.DrawIcon(x, y, m_hIcon);
 	}
 	else
@@ -536,8 +528,9 @@ void CPQ_GRAPHDlg::OnPaint()
 	}
 }
 
-// ユーザーが最小化したウィンドウをドラッグしているときに表示するカーソルを取得するために、
-//  システムがこの関数を呼び出します。
+/*
+* To get cursor when druged window that minimaized by user, System Call this Function
+*/
 HCURSOR CPQ_GRAPHDlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
@@ -552,16 +545,22 @@ int clipping(int y, int ymin, int ymax)
 	return y;
 }
 
+/*
+************************************************************
+* System Callback Fucntion
+************************************************************
+* Open MIDI and Font Thread
+* Update MIDI, Font and OpenGL
+*/
 LRESULT CPQ_GRAPHDlg::OnMessageRCV( WPARAM wParam, LPARAM lParam)
-// グラフを描画するためのイベント駆動型コード（システムからコールバックされる）
 {
 	// -------------------------------General------------------------------
-	// ジャイロ
+	//  Gyro
 	double gx = databuf[4][datasize - 1];
 	double gy = databuf[5][datasize - 1];
 	double gz = databuf[6][datasize - 1];
 
-	// 姿勢角
+	// Attitude angle
 	double ex = databuf[8][datasize - 1];
 	double ey = databuf[9][datasize - 1];
 	double ez = databuf[10][datasize - 1];
@@ -586,13 +585,11 @@ LRESULT CPQ_GRAPHDlg::OnMessageRCV( WPARAM wParam, LPARAM lParam)
 }
 
 
-
-
+/*
+* When Start Button is Pressed,  Open Wireless DataReciver thread 
+*/
 void CPQ_GRAPHDlg::OnBnClickedButton1()
-// STARTボタンが押されると、ワイヤレスデータの受信スレッドを起動する
 {
-	// START
-
 	DWORD d;
 
 	if(rf){
@@ -621,7 +618,6 @@ void CPQ_GRAPHDlg::OnBnClickedButton1()
 		glFlag = true;
 		std::thread glThread(&CPQ_GRAPHDlg::glCallback, this);
 		glThread.detach();
-		// ------------------------------OpenGl------------------------------
 	}else{
 		rf = 0;
 		CloseComPort();
@@ -629,10 +625,12 @@ void CPQ_GRAPHDlg::OnBnClickedButton1()
 	}
 }
 
+
+/*
+* When Stop Button is Pressed, Stop Wireless DataReciver thread and Delete Objet
+*/
 void CPQ_GRAPHDlg::OnBnClickedButton2()
-// STOPボタンが押されると、ワイヤレスデータの受信スレッドを停止させてオブジェクトを破棄する
 {
-	// STOP
 	if(rf){
 		rf = 0;
 
@@ -645,24 +643,25 @@ void CPQ_GRAPHDlg::OnBnClickedButton2()
 		serialh = NULL;
 		CloseComPort();
 		msgED3.SetWindowTextW(_T("Stop Recording"));
-		// ------------------------------OpenGl------------------------------
+		// ------------------------------OpenGL------------------------------
 		glFlag = false;
-		// ------------------------------OpenGl------------------------------
 	}else{
 		msgED3.SetWindowTextW(_T("Recording is not running..."));
 	}
 }
 
+
+/*
+* File Out 
+*/
 void CPQ_GRAPHDlg::OnBnClickedButton3()
 {
-	// FILE OUT
-
-	DWORD		dwFlags;
-	LPCTSTR		lpszFilter = _T("CSV File(*.csv)|*.csv|");
-	CString		fn, pathn;
-	int			i, j, k;
-	CString		rbuf;
-	CString		writebuffer;
+	DWORD	dwFlags;
+	LPCTSTR lpszFilter = _T("CSV File(*.csv)|*.csv|");
+	CString fn, pathn;
+	int	 i, j, k;
+	CString	rbuf;
+	CString	writebuffer;
 
 	if(rf){
 		msgED3.SetWindowTextW(_T("Recording thread is still running..."));
@@ -679,9 +678,7 @@ void CPQ_GRAPHDlg::OnBnClickedButton3()
 	CFileDialog myDLG( FALSE, _T("csv"), NULL, dwFlags, lpszFilter, NULL);
 	myDLG.m_ofn.lpstrInitialDir = DefaultDir;
 
-
 	if( myDLG.DoModal() != IDOK) return;
-
 
 	CStdioFile fout(myDLG.GetPathName(), CFile::modeWrite | CFile::typeText | CFile::modeCreate);
 
@@ -699,12 +696,12 @@ void CPQ_GRAPHDlg::OnBnClickedButton3()
 	// RAW DATA FORMAT
 	for( i = 0; i < datasize; i++){
 		writebuffer.Format(_T("%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n"), 
-			databuf[0][i],								 // sequence counter
-			databuf[1][i], databuf[2][i], databuf[3][i], // ax, ay, az
-			databuf[4][i], databuf[5][i], databuf[6][i], // wx, wy, wz;
-			databuf[7][i],							     // temperature
+			databuf[0][i],												// sequence counter
+			databuf[1][i], databuf[2][i], databuf[3][i],	// ax, ay, az
+			databuf[4][i], databuf[5][i], databuf[6][i],	// wx, wy, wz;
+			databuf[7][i],												// temperature
 			databuf[8][i], databuf[9][i], databuf[10][i], // e4x, e4y, e4z;
-			databuf[11][i]								 // confidence factor alpha
+			databuf[11][i]											// confidence factor alpha
 		);
 		fout.WriteString((LPCTSTR)writebuffer);
 	}
@@ -716,52 +713,53 @@ void CPQ_GRAPHDlg::OnBnClickedButton3()
 	msgED3.SetWindowTextW(_T("Motion Data File Writing Succeeded"));
 }
 
+
+/*
+* Run when Window is destroied
+*/
 void CPQ_GRAPHDlg::OnDestroy()
 {
 	CDialog::OnDestroy();
-	// TODO: ここにメッセージ ハンドラー コードを追加します。
-
 	// ------------------------------Font------------------------------
 	fontFlag = false;
-	m_newFont->DeleteObject(); // m_newFont内のオブジェクトを破棄
-	delete m_newFont; // ポインタを破棄
+	m_newFont->DeleteObject(); // Destroy m_newFont Object
+	delete m_newFont; // Delelte m_newFont 
 	// ------------------------------OpneGL------------------------------
 	glFlag = false;
-	wglMakeCurrent(NULL, NULL);
-	wglDeleteContext(m_GLRC);
+	wglMakeCurrent(NULL, NULL); // Disable Windows OpenGL Handler
+	wglDeleteContext(m_GLRC); // Delete Winddows OpenGL Context 
 	delete m_pDC;
 	// ------------------------------MIDI------------------------------
-	midiOutReset(hMIDI); // MIDIデバイスをリセットする
-	midiOutClose(hMIDI); // MIDIデバイスを終了する
+	midiOutReset(hMIDI); // Reset MIDI Device 
+	midiOutClose(hMIDI); // Close MIDI Device
 }
 
 
 /**********************************************
 
-以下、各処理に特化した関数を手動にて記述
+Wrote specialized function below
 
 ***********************************************/
 
 BOOL CPQ_GRAPHDlg::SetUpPixelFormat(HDC hdc)
 {
-	// TODO: ここに実装コードを追加します.
 	PIXELFORMATDESCRIPTOR pfd = {
-	sizeof(PIXELFORMATDESCRIPTOR),  // PFD のサイズ
-	1,                              // バージョン
-	PFD_DRAW_TO_WINDOW |            // ウィンドウに描画する
-	PFD_SUPPORT_OPENGL |            // OpenGL を使う
-	PFD_DOUBLEBUFFER,               // ダブルバッファリングする
-	PFD_TYPE_RGBA,                  // RGBA モード
-	24,                             // カラーバッファは 24 ビット
-	0, 0, 0, 0, 0, 0,               //  (各チャンネルのビット数は指定しない) 
-	0, 0,                           // アルファバッファは使わない
-	0, 0, 0, 0, 0,                  // アキュムレーションバッファは使わない
-	32,                             // デプスバッファは 32 ビット
-	0,                              // ステンシルバッファは使わない
-	0,                              // 補助バッファは使わない
-	PFD_MAIN_PLANE,                 // メインレイヤー
-	0,                              //  (予約) 
-	0, 0, 0                         // レイヤーマスクは無視する
+	sizeof(PIXELFORMATDESCRIPTOR),		// PFD Size
+	1,														//	Version 
+	PFD_DRAW_TO_WINDOW |				// Render to Window
+	PFD_SUPPORT_OPENGL |					// Use OpenGL
+	PFD_DOUBLEBUFFER,							// Do Double Buffering 
+	PFD_TYPE_RGBA,								// RGBA mode
+	24,													// Color Buffer 24bit 
+	0, 0, 0, 0, 0, 0,									// Don't specyfied bit (each channel)
+	0, 0,													// Don't use Alpha buffer
+	0, 0, 0, 0, 0,										// Don't user Accmulation Buffer
+	32,													// Depth buffer 32bit 
+	0,														// Don't use  stencil buffer
+	0,														// Don't use sub buffer
+	PFD_MAIN_PLANE,								// Main Layer
+	0,														// Preserved 
+	0, 0, 0												// ignore layer mask
 	};
 
 	int pf = ChoosePixelFormat(hdc, &pfd);
@@ -769,27 +767,38 @@ BOOL CPQ_GRAPHDlg::SetUpPixelFormat(HDC hdc)
 	return FALSE;
 }
 
+
+/*
+* Font Callback Fucntion
+*/
 void CPQ_GRAPHDlg::fontCallback(CString soundInfo)
 {
 	while (fontFlag) msgED1.SetWindowTextW(soundInfo);
 }
 
+
+/*
+* Set Font Style
+*/
 void CPQ_GRAPHDlg::setFontStyle()
 {
-	CFont *curFont;	// CFontのポインタを準備
-	curFont = msgED1.GetFont();	// Edit Controlから現在のフォントを取得
-	LOGFONTW mylf; // 一時的なマルチバイト文字列用のフォント変数を準備
-	curFont->GetLogFont(&mylf); // 現在のフォントをmylfに反映
-	mylf.lfHeight = 30; //文字の高さを変更
-	mylf.lfWidth = 15; // 文字の幅を変更
-	m_newFont = new CFont; // フォントを扱うメンバ変数にアドレスを割り当てる
-	m_newFont->CreateFontIndirectW(&mylf); // 論理フォントをm_newFontに格納
-	msgED1.SetFont(m_newFont); // コントローラ変数にフォントをセット
+	CFont *curFont;											// Prepare Pointer of CFont
+	curFont = msgED1.GetFont();						// Get Current FOnt from Edit Control
+	LOGFONTW mylf;										// Prepare variable for Multi Byte String
+	curFont->GetLogFont(&mylf);						// Reflect Current FOnt to nylf
+	mylf.lfHeight = 30;										// Change Font height
+	mylf.lfWidth = 15;										// Change Font width 
+	m_newFont = new CFont;							// Store Adress in Member variable that handling font
+	m_newFont->CreateFontIndirectW(&mylf);	// Store Logical Font in m_newFont
+	msgED1.SetFont(m_newFont);					// Set Font to Controller variablel
 }
 
+
+/*
+* OpenGL Callback Function
+*/
 void CPQ_GRAPHDlg::glCallback()
 {
-	// TODO: ここに実装コードを追加します.
 	glSetup();
 	while (glFlag) {
 		Viewer::draw();
@@ -797,6 +806,10 @@ void CPQ_GRAPHDlg::glCallback()
 	}
 }
 
+
+/*
+* Setup OpenGL Context & GLUT
+*/
 void CPQ_GRAPHDlg::glSetup()
 {
 	m_pDC = new CClientDC(&m_glView);
@@ -805,7 +818,7 @@ void CPQ_GRAPHDlg::glSetup()
 		m_GLRC = wglCreateContext(m_pDC->m_hDC);
 		wglMakeCurrent(m_pDC->m_hDC, m_GLRC);
 
-		CRect rc; // 描画領域を保存するための変数を用意
+		CRect rc; // Get Rendering Context Size 
 		m_glView.GetClientRect(&rc);
 		GLint width = rc.Width();
 		GLint height = rc.Height();
@@ -814,11 +827,17 @@ void CPQ_GRAPHDlg::glSetup()
 	}
 }
 
+/*
+* Sound Callback Function
+*/
 void CPQ_GRAPHDlg::midiCallback(const double gx, const double gy, const double ey)
 {
 	Sound::calcToDeg(ey);
 	Sound::setScaleIndex();
 
+	/*
+	* Check User twist speed
+	*/
 	if (Sound::count < 3) {
 		if (gy > 10000.0) {
 			Sound::border[Sound::count] = gy;
@@ -834,9 +853,7 @@ void CPQ_GRAPHDlg::midiCallback(const double gx, const double gy, const double e
 		Sound::count += 1;
 	}
 	else {
-		if (gy < -10000) {
-			Sound::soundFlag = false;
-		}
+		if (gy < -10000) Sound::soundFlag = false;
 		Sound::emit(gx, gy);
 	}
 }

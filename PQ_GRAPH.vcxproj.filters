@@ -47,6 +47,9 @@
     <ClInclude Include="Viewer.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="MyTexture.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\PQ_GRAPH.ico">
